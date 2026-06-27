@@ -24,7 +24,8 @@ function formatKstShort(date) {
 
 function grade(score) {
   if (score >= 90) return "🟢 매우 좋음";
-  if (score >= 75) return "🟡 좋음";
+  if (score >= 80) return "🟢 좋음";
+  if (score >= 70) return "🟡 좋음";
   if (score >= 60) return "🟠 애매함";
   return "🔴 어려움";
 }
@@ -37,13 +38,21 @@ function formatMagnitude(value) {
   return `${Number(value).toFixed(1)} mag`;
 }
 
+function weatherValue(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "N/A";
+  }
+
+  return `${Math.round(Number(value))}%`;
+}
+
 function reasonText(r) {
   return [
     `고도 ${Math.round(r.elevationDeg)}°`,
     `${r.direction}`,
     `거리 ${Math.round(r.rangeKm)}km`,
-    `구름 ${r.weather.cloudCover}%`,
-    `강수 ${r.weather.precipitationProbability}%`
+    `구름 ${weatherValue(r.weather.cloudCover)}`,
+    `강수 ${weatherValue(r.weather.precipitationProbability)}`
   ].join(" · ");
 }
 
@@ -67,20 +76,37 @@ function buildGoodMessage(siteResults) {
 
   const lines = [];
 
-  lines.push("🛰️ <b>Starlink Observer AI V2.2</b>");
+  lines.push("🛰️ <b>Starlink Observer AI V2.4</b>");
   lines.push("오늘 실제 관측 추천 후보입니다.");
   lines.push("");
 
-  for (const r of good) {
-    lines.push(`${grade(r.score)} <b>${r.city}</b>`);
-    lines.push(`${formatKstShort(r.date)} | ${r.score}점 | 성공률 ${r.probability}%`);
-    lines.push(`${r.stars} | 밝기 ${formatMagnitude(r.magnitude)}`);
-    lines.push(`${reasonText(r)}`);
-    lines.push(`태양고도 ${Math.round(r.sunAltitudeDeg)}° | ${r.satName}`);
+  const best = good[0];
+
+  lines.push("⭐ <b>오늘 최고의 관측</b>");
+  lines.push(`${grade(best.score)} <b>${best.city}</b>`);
+  lines.push(`${formatKstShort(best.date)} | ${best.score}점 | 성공률 ${best.probability}%`);
+  lines.push(`${best.stars} | 밝기 ${formatMagnitude(best.magnitude)}`);
+  lines.push(`${reasonText(best)}`);
+  lines.push(`태양고도 ${Math.round(best.sunAltitudeDeg)}° | ${best.satName}`);
+  lines.push("");
+
+  const others = good.slice(1);
+
+  if (others.length > 0) {
+    lines.push("📍 <b>지역별 후보</b>");
     lines.push("");
+
+    for (const r of others) {
+      lines.push(`${grade(r.score)} <b>${r.city}</b>`);
+      lines.push(`${formatKstShort(r.date)} | ${r.score}점 | 성공률 ${r.probability}%`);
+      lines.push(`${r.stars} | 밝기 ${formatMagnitude(r.magnitude)}`);
+      lines.push(`${reasonText(r)}`);
+      lines.push(`태양고도 ${Math.round(r.sunAltitudeDeg)}° | ${r.satName}`);
+      lines.push("");
+    }
   }
 
-  lines.push("기준: 고도각 + 태양고도 + 밝기 + 구름 + 강수 + 거리");
+  lines.push("기준: 고도각 + 태양고도 + 위성햇빛 + 밝기 + 구름 + 강수 + 거리");
 
   return lines.join("\n");
 }
@@ -88,14 +114,14 @@ function buildGoodMessage(siteResults) {
 function buildTestMessage(siteResults) {
   const lines = [];
 
-  lines.push("🛰️ <b>Starlink Observer AI V2.2 테스트 리포트</b>");
+  lines.push("🛰️ <b>Starlink Observer AI V2.4 테스트 리포트</b>");
   lines.push(`${CONFIG.scoring.minScoreToNotify}점 이상 관측 후보는 없습니다.`);
   lines.push("");
 
   for (const r of siteResults) {
     if (!r.best) {
       lines.push(`🔴 <b>${r.city}</b> | 후보 없음`);
-      lines.push("- 야간 시간대에 고도/날씨 조건을 만족한 위성이 없습니다.");
+      lines.push("- 야간 시간대에 고도/날씨/위성햇빛 조건을 만족한 위성이 없습니다.");
       lines.push("");
       continue;
     }
@@ -119,7 +145,7 @@ function makeCacheKey(message) {
 }
 
 async function runObserver() {
-  console.log(`[${new Date().toISOString()}] Starlink Observer AI V2.2 started`);
+  console.log(`[${new Date().toISOString()}] Starlink Observer AI V2.4 started`);
 
   const tles = await fetchStarlinkTles();
   console.log(`Loaded Starlink TLE: ${tles.length}`);
@@ -178,3 +204,4 @@ main().catch(async err => {
 
   process.exit(1);
 });
+
