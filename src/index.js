@@ -11,7 +11,7 @@ validateConfig();
 
 const sentCache = new Set();
 
-function formatKst(date) {
+function formatKstShort(date) {
   return new Intl.DateTimeFormat("ko-KR", {
     timeZone: CONFIG.timezone,
     month: "2-digit",
@@ -23,26 +23,34 @@ function formatKst(date) {
 }
 
 function grade(score) {
-  if (score >= 85) return "🟢 매우 좋음";
-  if (score >= 70) return "🟡 관측 가능";
-  if (score >= 50) return "🟠 부족";
+  if (score >= 90) return "🟢 매우 좋음";
+  if (score >= 75) return "🟡 좋음";
+  if (score >= 60) return "🟠 애매함";
   return "🔴 어려움";
+}
+
+function formatMagnitude(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "계산불가";
+  }
+
+  return `${Number(value).toFixed(1)} mag`;
 }
 
 function reasonText(r) {
   return [
-    `방향 ${r.direction}`,
     `고도 ${Math.round(r.elevationDeg)}°`,
+    `${r.direction}`,
     `거리 ${Math.round(r.rangeKm)}km`,
     `구름 ${r.weather.cloudCover}%`,
-    `강수확률 ${r.weather.precipitationProbability}%`
+    `강수 ${r.weather.precipitationProbability}%`
   ].join(" · ");
 }
 
 function failReason(best) {
   if (!best) return "후보 위성 없음";
   if (!isObservableNight(best.date, { lat: best.lat, lon: best.lon })) return "밝은 시간대";
-  if (best.weather.cloudCover >= 70) return "구름 많음";
+  if (best.weather.cloudCover >= 75) return "구름 많음";
   if (best.weather.precipitationProbability >= 50) return "강수확률 높음";
   if (best.elevationDeg < 35) return "고도 낮음";
   if (best.score < CONFIG.scoring.minScoreToNotify) return "점수 부족";
@@ -59,21 +67,20 @@ function buildGoodMessage(siteResults) {
 
   const lines = [];
 
-  lines.push("🛰️ <b>Starlink Observer AI V2.1</b>");
-  lines.push("실제 고도각 + 태양고도 + 날씨 기준 관측 후보입니다.");
+  lines.push("🛰️ <b>Starlink Observer AI V2.2</b>");
+  lines.push("오늘 실제 관측 추천 후보입니다.");
   lines.push("");
 
   for (const r of good) {
-    lines.push(
-      `${grade(r.score)} <b>${r.city}</b> | ${formatKst(r.date)} | ${r.score}점`
-    );
-    lines.push(`- ${reasonText(r)}`);
-    lines.push(`- 태양고도: ${Math.round(r.sunAltitudeDeg)}°`);
-    lines.push(`- 위성: ${r.satName}`);
+    lines.push(`${grade(r.score)} <b>${r.city}</b>`);
+    lines.push(`${formatKstShort(r.date)} | ${r.score}점 | 성공률 ${r.probability}%`);
+    lines.push(`${r.stars} | 밝기 ${formatMagnitude(r.magnitude)}`);
+    lines.push(`${reasonText(r)}`);
+    lines.push(`태양고도 ${Math.round(r.sunAltitudeDeg)}° | ${r.satName}`);
     lines.push("");
   }
 
-  lines.push("기준: 실제 고도각 + 태양고도 -8° 이하 + 구름 + 강수확률 + 가시거리");
+  lines.push("기준: 고도각 + 태양고도 + 밝기 + 구름 + 강수 + 거리");
 
   return lines.join("\n");
 }
@@ -81,7 +88,7 @@ function buildGoodMessage(siteResults) {
 function buildTestMessage(siteResults) {
   const lines = [];
 
-  lines.push("🛰️ <b>Starlink Observer AI V2.1 테스트 리포트</b>");
+  lines.push("🛰️ <b>Starlink Observer AI V2.2 테스트 리포트</b>");
   lines.push(`${CONFIG.scoring.minScoreToNotify}점 이상 관측 후보는 없습니다.`);
   lines.push("");
 
@@ -93,13 +100,12 @@ function buildTestMessage(siteResults) {
       continue;
     }
 
-    lines.push(
-      `${grade(r.best.score)} <b>${r.city}</b> | 최고 ${r.best.score}점 | ${formatKst(r.best.date)}`
-    );
-    lines.push(`- 탈락 이유: ${failReason(r.best)}`);
-    lines.push(`- ${reasonText(r.best)}`);
-    lines.push(`- 태양고도: ${Math.round(r.best.sunAltitudeDeg)}°`);
-    lines.push(`- 후보 수: ${r.totalCandidates}개`);
+    lines.push(`${grade(r.best.score)} <b>${r.city}</b>`);
+    lines.push(`${formatKstShort(r.best.date)} | 최고 ${r.best.score}점 | 성공률 ${r.best.probability}%`);
+    lines.push(`${r.best.stars} | 밝기 ${formatMagnitude(r.best.magnitude)}`);
+    lines.push(`탈락 이유: ${failReason(r.best)}`);
+    lines.push(`${reasonText(r.best)}`);
+    lines.push(`태양고도 ${Math.round(r.best.sunAltitudeDeg)}° | 후보 ${r.totalPasses ?? r.totalCandidates}개`);
     lines.push("");
   }
 
@@ -113,7 +119,7 @@ function makeCacheKey(message) {
 }
 
 async function runObserver() {
-  console.log(`[${new Date().toISOString()}] Starlink Observer AI V2.1 started`);
+  console.log(`[${new Date().toISOString()}] Starlink Observer AI V2.2 started`);
 
   const tles = await fetchStarlinkTles();
   console.log(`Loaded Starlink TLE: ${tles.length}`);
@@ -127,7 +133,7 @@ async function runObserver() {
     const result = findPassesForSite(site, tles, weather);
 
     console.log(
-      `${site.name}: candidates=${result.totalCandidates}, best=${result.best?.score ?? "none"}`
+      `${site.name}: candidates=${result.totalCandidates}, passes=${result.totalPasses ?? "n/a"}, best=${result.best?.score ?? "none"}`
     );
 
     siteResults.push(result);
