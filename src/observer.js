@@ -39,9 +39,7 @@ export function getSunAltitudeDeg(site, date) {
 }
 
 export function isObservableNight(date, site = null) {
-  if (site) {
-    return getSunAltitudeDeg(site, date) <= -8;
-  }
+  if (site) return getSunAltitudeDeg(site, date) <= -8;
 
   const hour = getKstHour(date);
   return hour >= 20 || hour <= 4;
@@ -85,36 +83,41 @@ export function getLookAngles(site, satrec, date) {
 }
 
 function estimateMagnitude({ elevationDeg, rangeKm, sunAltitudeDeg, cloudCover }) {
-  let mag = 3.2;
+  let mag = 3.4;
 
-  if (elevationDeg >= 75) mag -= 2.6;
-  else if (elevationDeg >= 60) mag -= 2.1;
-  else if (elevationDeg >= 45) mag -= 1.5;
-  else if (elevationDeg >= 30) mag -= 0.8;
-  else mag -= 0.2;
+  if (elevationDeg >= 85) mag -= 2.4;
+  else if (elevationDeg >= 75) mag -= 2.1;
+  else if (elevationDeg >= 65) mag -= 1.7;
+  else if (elevationDeg >= 55) mag -= 1.3;
+  else if (elevationDeg >= 45) mag -= 0.9;
+  else if (elevationDeg >= 35) mag -= 0.5;
+  else mag -= 0.1;
 
-  if (rangeKm <= 450) mag -= 1.0;
-  else if (rangeKm <= 650) mag -= 0.6;
-  else if (rangeKm <= 900) mag -= 0.2;
-  else if (rangeKm >= 1300) mag += 0.8;
+  if (rangeKm <= 320) mag -= 1.0;
+  else if (rangeKm <= 450) mag -= 0.7;
+  else if (rangeKm <= 650) mag -= 0.4;
+  else if (rangeKm <= 900) mag -= 0.1;
+  else if (rangeKm >= 1300) mag += 0.7;
 
-  if (sunAltitudeDeg <= -18) mag += 0.6;
-  else if (sunAltitudeDeg <= -12) mag += 0.1;
-  else if (sunAltitudeDeg <= -8) mag += 0.5;
+  if (sunAltitudeDeg <= -18) mag += 0.5;
+  else if (sunAltitudeDeg <= -14) mag += 0.2;
+  else if (sunAltitudeDeg <= -10) mag += 0.4;
+  else if (sunAltitudeDeg <= -8) mag += 0.8;
 
   if (cloudCover >= 60) mag += 1.4;
-  else if (cloudCover >= 40) mag += 0.8;
-  else if (cloudCover >= 25) mag += 0.4;
+  else if (cloudCover >= 40) mag += 0.9;
+  else if (cloudCover >= 25) mag += 0.5;
+  else if (cloudCover >= 10) mag += 0.2;
 
   return Math.round(mag * 10) / 10;
 }
 
 function starRating(magnitude) {
   if (magnitude <= -1.0) return "★★★★★";
-  if (magnitude <= 0.0) return "★★★★";
-  if (magnitude <= 1.0) return "★★★";
-  if (magnitude <= 2.0) return "★★";
-  return "★";
+  if (magnitude <= -0.2) return "★★★★☆";
+  if (magnitude <= 0.8) return "★★★☆☆";
+  if (magnitude <= 1.8) return "★★☆☆☆";
+  return "★☆☆☆☆";
 }
 
 export function scorePass({ site, elevationDeg, rangeKm, weather, date }) {
@@ -125,43 +128,50 @@ export function scorePass({ site, elevationDeg, rangeKm, weather, date }) {
   const visibility = Number(weather.visibility ?? 0);
   const sunAltitudeDeg = getSunAltitudeDeg(site, date);
 
+  if (cloud >= 75) return 0;
+  if (rain >= 50) return 0;
+
   let score = 0;
 
-  if (elevationDeg >= 80) score += 32;
-  else if (elevationDeg >= 65) score += 28;
-  else if (elevationDeg >= 50) score += 22;
-  else if (elevationDeg >= 35) score += 15;
-  else if (elevationDeg >= 25) score += 8;
+  if (elevationDeg >= 85) score += 28;
+  else if (elevationDeg >= 75) score += 25;
+  else if (elevationDeg >= 65) score += 22;
+  else if (elevationDeg >= 55) score += 18;
+  else if (elevationDeg >= 45) score += 14;
+  else if (elevationDeg >= 35) score += 9;
+  else if (elevationDeg >= 25) score += 4;
   else return 0;
 
-  if (sunAltitudeDeg <= -16) score += 20;
-  else if (sunAltitudeDeg <= -12) score += 17;
-  else if (sunAltitudeDeg <= -10) score += 12;
-  else if (sunAltitudeDeg <= -8) score += 7;
+  if (sunAltitudeDeg <= -18) score += 17;
+  else if (sunAltitudeDeg <= -15) score += 15;
+  else if (sunAltitudeDeg <= -12) score += 12;
+  else if (sunAltitudeDeg <= -10) score += 8;
+  else if (sunAltitudeDeg <= -8) score += 4;
   else return 0;
 
-  if (cloud <= 5) score += 24;
-  else if (cloud <= 15) score += 20;
-  else if (cloud <= 25) score += 14;
-  else if (cloud <= 40) score += 7;
+  if (cloud <= 3) score += 22;
+  else if (cloud <= 8) score += 19;
+  else if (cloud <= 15) score += 15;
+  else if (cloud <= 25) score += 10;
+  else if (cloud <= 40) score += 5;
   else if (cloud <= 55) score -= 8;
-  else if (cloud <= 70) score -= 25;
-  else return 0;
+  else score -= 22;
 
-  if (rain <= 5) score += 10;
-  else if (rain <= 15) score += 6;
-  else if (rain <= 30) score += 1;
-  else if (rain <= 45) score -= 18;
-  else return 0;
+  if (rain <= 2) score += 9;
+  else if (rain <= 8) score += 7;
+  else if (rain <= 15) score += 4;
+  else if (rain <= 30) score -= 4;
+  else score -= 18;
 
-  if (visibility >= 20000) score += 6;
+  if (visibility >= 20000) score += 5;
   else if (visibility >= 12000) score += 3;
-  else if (visibility > 0 && visibility < 8000) score -= 12;
+  else if (visibility > 0 && visibility < 8000) score -= 10;
 
-  if (rangeKm <= 450) score += 8;
-  else if (rangeKm <= 650) score += 5;
-  else if (rangeKm <= 900) score += 2;
-  else if (rangeKm >= 1300) score -= 12;
+  if (rangeKm <= 320) score += 8;
+  else if (rangeKm <= 450) score += 6;
+  else if (rangeKm <= 650) score += 4;
+  else if (rangeKm <= 900) score += 1;
+  else if (rangeKm >= 1300) score -= 10;
 
   const magnitude = estimateMagnitude({
     elevationDeg,
@@ -170,13 +180,27 @@ export function scorePass({ site, elevationDeg, rangeKm, weather, date }) {
     cloudCover: cloud
   });
 
-  if (magnitude <= -1) score += 10;
-  else if (magnitude <= 0) score += 7;
-  else if (magnitude <= 1) score += 4;
-  else if (magnitude <= 2) score += 1;
+  if (magnitude <= -1.0) score += 10;
+  else if (magnitude <= -0.2) score += 7;
+  else if (magnitude <= 0.8) score += 4;
+  else if (magnitude <= 1.8) score += 1;
   else score -= 8;
 
-  return Math.max(0, Math.min(100, Math.round(score)));
+  return Math.max(0, Math.min(99, Math.round(score)));
+}
+
+function successProbability(score, weather) {
+  const cloud = Number(weather.cloudCover ?? 100);
+  const rain = Number(weather.precipitationProbability ?? 100);
+
+  let p = score;
+
+  if (cloud >= 40) p -= 10;
+  if (cloud >= 55) p -= 10;
+  if (rain >= 20) p -= 8;
+  if (rain >= 35) p -= 10;
+
+  return Math.max(0, Math.min(97, Math.round(p)));
 }
 
 function isHardWeatherFail(weather) {
@@ -190,7 +214,7 @@ function isHardWeatherFail(weather) {
 }
 
 function makePassKey(candidate) {
-  const bucket = Math.floor(candidate.date.getTime() / (12 * 60 * 1000));
+  const bucket = Math.floor(candidate.date.getTime() / (40 * 60 * 1000));
   return `${candidate.city}-${bucket}`;
 }
 
@@ -209,16 +233,10 @@ function collapseSamePasses(candidates) {
   return Array.from(map.values()).sort((a, b) => b.score - a.score);
 }
 
-function successProbability(score, weather) {
-  const cloud = Number(weather.cloudCover ?? 100);
-  const rain = Number(weather.precipitationProbability ?? 100);
+function selectBestPerCity(collapsed) {
+  if (collapsed.length === 0) return [];
 
-  let p = score;
-
-  if (cloud >= 50) p -= 12;
-  if (rain >= 30) p -= 10;
-
-  return Math.max(0, Math.min(98, Math.round(p)));
+  return [collapsed[0]];
 }
 
 export function findPassesForSite(site, rawTles, weather) {
@@ -269,6 +287,8 @@ export function findPassesForSite(site, rawTles, weather) {
         date
       });
 
+      if (score <= 0) continue;
+
       candidates.push({
         city: site.name,
         lat: site.lat,
@@ -292,25 +312,15 @@ export function findPassesForSite(site, rawTles, weather) {
   const collapsed = collapseSamePasses(candidates);
   const best = collapsed[0] || null;
 
-  const selected = [];
-
-  for (const c of collapsed) {
-    if (c.score < CONFIG.scoring.minScoreToNotify) continue;
-
-    const tooClose = selected.some(d => {
-      return Math.abs(d.date.getTime() - c.date.getTime()) < 25 * 60 * 1000;
-    });
-
-    if (!tooClose) selected.push(c);
-
-    if (selected.length >= CONFIG.starlink.maxResultsPerCity) break;
-  }
+  const selected = selectBestPerCity(collapsed).filter(
+    c => c.score >= CONFIG.scoring.minScoreToNotify
+  );
 
   return {
     city: site.name,
     totalCandidates: candidates.length,
     totalPasses: collapsed.length,
     best,
-    selected: selected.sort((a, b) => a.date - b.date)
+    selected
   };
 }
