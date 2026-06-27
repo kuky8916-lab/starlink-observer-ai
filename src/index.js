@@ -1,4 +1,12 @@
-import { twoline2satrec, propagate, gstime, eciToGeodetic, degreesLat, degreesLong } from "satellite.js";
+import {
+  twoline2satrec,
+  propagate,
+  gstime,
+  eciToGeodetic,
+  degreesLat,
+  degreesLong
+} from "satellite.js";
+
 import { CONFIG, validateConfig } from "./config.js";
 import { getWeatherForecast, findNearestWeather } from "./weather.js";
 import { sendTelegram } from "./telegram.js";
@@ -16,6 +24,24 @@ function formatKst(date) {
     minute: "2-digit",
     hour12: false
   }).format(date);
+}
+
+function getKstHour(date) {
+  return Number(
+    new Intl.DateTimeFormat("ko-KR", {
+      timeZone: CONFIG.timezone,
+      hour: "2-digit",
+      hour12: false
+    }).format(date)
+  );
+}
+
+function isObservableNight(date) {
+  const hour = getKstHour(date);
+
+  // 밝은 시간대 완전 제외
+  // 관측 가능 시간: 저녁 20시 ~ 새벽 04시
+  return hour >= 20 || hour <= 4;
 }
 
 async function fetchStarlinkTles() {
@@ -46,7 +72,7 @@ async function fetchStarlinkTles() {
         satrec: twoline2satrec(line1, line2)
       });
     } catch {
-      // skip bad TLE
+      // 잘못된 TLE는 무시
     }
   }
 
@@ -70,6 +96,7 @@ function getSatellitePosition(satrec, date) {
 
 function haversineKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
+
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
 
@@ -96,41 +123,33 @@ function estimateElevationDeg(observer, satPos) {
   return angleRad * 180 / Math.PI;
 }
 
-function isNightLike(date) {
-  const hour = Number(
-    new Intl.DateTimeFormat("ko-KR", {
-      timeZone: CONFIG.timezone,
-      hour: "2-digit",
-      hour12: false
-    }).format(date)
-  );
-
-  return hour >= 19 || hour <= 5;
-}
-
 function scorePass({ elevationDeg, weather, date }) {
+  if (!isObservableNight(date)) return 0;
+
   let score = 0;
 
-  if (elevationDeg >= 70) score += 40;
+  if (elevationDeg >= 80) score += 45;
+  else if (elevationDeg >= 65) score += 40;
   else if (elevationDeg >= 50) score += 32;
   else if (elevationDeg >= 35) score += 24;
-  else if (elevationDeg >= 20) score += 15;
+  else if (elevationDeg >= 25) score += 15;
+  else return 0;
 
-  if (isNightLike(date)) score += 25;
-  else score -= 20;
+  score += 25;
 
   const cloud = weather.cloudCover;
-  if (cloud <= 20) score += 25;
+  if (cloud <= 10) score += 30;
+  else if (cloud <= 25) score += 25;
   else if (cloud <= 40) score += 15;
   else if (cloud <= 60) score += 5;
-  else if (cloud <= 80) score -= 15;
-  else score -= 30;
+  else if (cloud <= 80) score -= 20;
+  else score -= 40;
 
   const rain = weather.precipitationProbability;
-  if (rain <= 20) score += 10;
-  else if (rain <= 40) score += 0;
-  else if (rain <= 60) score -= 15;
-  else score -= 30;
+  if (rain <= 10) score += 10;
+  else if (rain <= 30) score += 5;
+  else if (rain <= 50) score -= 15;
+  else score -= 35;
 
   if ((weather.visibility ?? 0) >= 15000) score += 5;
 
@@ -140,34 +159,37 @@ function scorePass({ elevationDeg, weather, date }) {
 function grade(score) {
   if (score >= 85) return "🟢 매우 좋음";
   if (score >= 70) return "🟡 관측 가능";
-  if (score >= 60) return "🟠 애매함";
   return "🔴 어려움";
 }
 
-function reasonText({ elevationDeg, weather, date }) {
-  const reasons = [];
-
-  reasons.push(`고도 ${Math.round(elevationDeg)}°`);
-
-  if (isNightLike(date)) reasons.push("야간 시간대");
-  else reasons.push("밝은 시간대");
-
-  reasons.push(`구름 ${weather.cloudCover}%`);
-  reasons.push(`강수확률 ${weather.precipitationProbability}%`);
-
-  return reasons.join(" · ");
+function reasonText({ elevationDeg, weather }) {
+  return [
+    `고도 ${Math.round(elevationDeg)}°`,
+    `야간 시간대`,
+    `구름 ${weather.cloudCover}%`,
+    `강수확률 ${weather.precipitationProbability}%`
+  ].join(" · ");
 }
 
 function buildPassesForSite(site, sats, weather) {
   const now = new Date();
-  const end = new Date(now.getTime() + CONFIG.starlink.lookAheadHours * 3600 * 1000);
+  const end = new Date(
+    now.getTime() + CONFIG.starlink.lookAheadHours * 3600 * 1000
+  );
 
   const candidates = [];
+  const targetSats = sats.slice(0, CONFIG.starlink.maxSatellitesToCheck);
 
-  for (let t = now.getTime(); t <= end.getTime(); t += CONFIG.starlink.stepSeconds * 1000) {
+  for (
+    let t = now.getTime();
+    t <= end.getTime();
+    t += CONFIG.starlink.stepSeconds * 1000
+  ) {
     const date = new Date(t);
 
-    for (const sat of sats.slice(0, 600)) {
+    if (!isObservableNight(date)) continue;
+
+    for (const sat of targetSats) {
       const pos = getSatellitePosition(sat.satrec, date);
       if (!pos) continue;
 
@@ -175,11 +197,14 @@ function buildPassesForSite(site, sats, weather) {
       if (elevationDeg < CONFIG.starlink.minElevationDeg) continue;
 
       const nearestWeather = findNearestWeather(weather, date);
+
       const score = scorePass({
         elevationDeg,
         weather: nearestWeather,
         date
       });
+
+      if (score < CONFIG.scoring.minScoreToNotify) continue;
 
       candidates.push({
         city: site.name,
@@ -196,7 +221,7 @@ function buildPassesForSite(site, sats, weather) {
 
   for (const c of candidates.sort((a, b) => b.score - a.score)) {
     const tooClose = deduped.some(d => {
-      return Math.abs(d.date.getTime() - c.date.getTime()) < 10 * 60 * 1000;
+      return Math.abs(d.date.getTime() - c.date.getTime()) < 15 * 60 * 1000;
     });
 
     if (!tooClose) deduped.push(c);
@@ -204,14 +229,18 @@ function buildPassesForSite(site, sats, weather) {
     if (deduped.length >= CONFIG.starlink.maxResultsPerCity) break;
   }
 
-  return deduped;
+  return deduped.sort((a, b) => a.date - b.date);
 }
 
 function buildMessage(results) {
   const good = results
     .flat()
     .filter(r => r.score >= CONFIG.scoring.minScoreToNotify)
-    .sort((a, b) => b.score - a.score);
+    .filter(r => isObservableNight(r.date))
+    .sort((a, b) => {
+      if (a.city === b.city) return a.date - b.date;
+      return b.score - a.score;
+    });
 
   if (good.length === 0) {
     return null;
@@ -219,8 +248,8 @@ function buildMessage(results) {
 
   const lines = [];
 
-  lines.push("🛰️ <b>Starlink Observer AI V2.0</b>");
-  lines.push("관측 성공 가능성이 있는 시간대입니다.");
+  lines.push("🛰️ <b>Starlink Observer AI V2.0.1</b>");
+  lines.push("관측 가능성이 높은 시간대만 선별했습니다.");
   lines.push("");
 
   for (const r of good) {
@@ -232,7 +261,8 @@ function buildMessage(results) {
     lines.push("");
   }
 
-  lines.push("기준: 고도 + 야간 여부 + 구름 + 강수확률 + 가시거리");
+  lines.push("기준: 야간 필수 + 고도 + 구름 + 강수확률 + 가시거리");
+  lines.push("※ 밝은 시간대와 70점 미만은 전송 제외");
 
   return lines.join("\n");
 }
@@ -241,12 +271,13 @@ function makeCacheKey(results) {
   return results
     .flat()
     .filter(r => r.score >= CONFIG.scoring.minScoreToNotify)
+    .filter(r => isObservableNight(r.date))
     .map(r => `${r.city}-${formatKst(r.date)}-${r.score}`)
     .join("|");
 }
 
 async function runObserver() {
-  console.log(`[${new Date().toISOString()}] Starlink Observer AI started`);
+  console.log(`[${new Date().toISOString()}] Starlink Observer AI V2.0.1 started`);
 
   const sats = await fetchStarlinkTles();
   console.log(`Loaded Starlink TLE: ${sats.length}`);
@@ -277,6 +308,7 @@ async function runObserver() {
   }
 
   sentCache.add(cacheKey);
+
   await sendTelegram(message);
 
   console.log("Telegram sent.");
@@ -290,6 +322,10 @@ async function main() {
       await runObserver();
     } catch (err) {
       console.error(err);
+
+      try {
+        await sendTelegram(`❌ Starlink Observer AI 오류\n${err.message}`);
+      } catch {}
     }
   }, CONFIG.schedule.intervalMinutes * 60 * 1000);
 }
@@ -298,7 +334,7 @@ main().catch(async err => {
   console.error(err);
 
   try {
-    await sendTelegram(`❌ Starlink Observer AI 오류\n${err.message}`);
+    await sendTelegram(`❌ Starlink Observer AI 시작 실패\n${err.message}`);
   } catch {}
 
   process.exit(1);
