@@ -12,12 +12,11 @@ function toKstHourString(date) {
   }).formatToParts(d);
 
   const get = (type) => parts.find((p) => p.type === type)?.value;
-
   return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:00`;
 }
 
-async function getOpenMeteoWeather(lat, lon, targetDate) {
-  const url = "https://api.open-meteo.com/v1/forecast";
+async function getWeather(lat, lon, targetDate) {
+  const url = "https://api.open-meteo.com/v1/kma";
 
   const res = await axios.get(url, {
     params: {
@@ -35,12 +34,10 @@ async function getOpenMeteoWeather(lat, lon, targetDate) {
   const targetHour = toKstHourString(targetDate);
   const idx = data.hourly.time.indexOf(targetHour);
 
-  if (idx === -1) {
-    return null;
-  }
+  if (idx === -1) return null;
 
   return {
-    source: "open-meteo",
+    source: "open-meteo-kma",
     time: data.hourly.time[idx],
     cloud: data.hourly.cloud_cover[idx],
     precipitationProbability: data.hourly.precipitation_probability[idx],
@@ -57,52 +54,45 @@ function judgeWeather(weather, limits) {
     return {
       ok: false,
       level: "unknown",
-      reason: "날씨 정보를 가져오지 못했습니다.",
+      reason: "날씨 정보 없음",
     };
   }
 
-  const badReasons = [];
+  const bad = [];
 
   if (weather.precipitationProbability >= limits.rainProbabilityLimit) {
-    badReasons.push(`강수확률 ${weather.precipitationProbability}%`);
+    bad.push(`강수확률 ${weather.precipitationProbability}%`);
   }
 
   if (weather.precipitation >= limits.rainAmountLimit) {
-    badReasons.push(`강수량 ${weather.precipitation}mm`);
+    bad.push(`강수량 ${weather.precipitation}mm`);
   }
 
   if (weather.cloud >= limits.cloudLimit) {
-    badReasons.push(`구름 ${weather.cloud}%`);
+    bad.push(`구름 ${weather.cloud}%`);
   }
 
-  if (badReasons.length > 0) {
+  if (bad.length > 0) {
     return {
       ok: false,
       level: "bad",
-      reason: badReasons.join(", "),
-    };
-  }
-
-  if (
-    weather.cloud <= 25 &&
-    weather.precipitationProbability <= 10 &&
-    weather.precipitation === 0
-  ) {
-    return {
-      ok: true,
-      level: "excellent",
-      reason: "관측 조건 좋음",
+      reason: bad.join(", "),
     };
   }
 
   return {
     ok: true,
-    level: "normal",
+    level:
+      weather.cloud <= 25 &&
+      weather.precipitationProbability <= 10 &&
+      weather.precipitation === 0
+        ? "excellent"
+        : "normal",
     reason: "관측 가능",
   };
 }
 
 module.exports = {
-  getOpenMeteoWeather,
+  getWeather,
   judgeWeather,
 };
