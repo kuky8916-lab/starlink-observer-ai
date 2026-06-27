@@ -38,24 +38,15 @@ function getKstHour(date) {
 
 function isObservableNight(date) {
   const hour = getKstHour(date);
-
-  // 밝은 시간대 완전 제외
-  // 관측 가능 시간: 저녁 20시 ~ 새벽 04시
   return hour >= 20 || hour <= 4;
 }
 
 async function fetchStarlinkTles() {
   const res = await fetch(CONFIG.starlink.tleUrl);
-
-  if (!res.ok) {
-    throw new Error(`TLE fetch error: ${res.status}`);
-  }
+  if (!res.ok) throw new Error(`TLE fetch error: ${res.status}`);
 
   const text = await res.text();
-  const lines = text
-    .split("\n")
-    .map(v => v.trim())
-    .filter(Boolean);
+  const lines = text.split("\n").map(v => v.trim()).filter(Boolean);
 
   const sats = [];
 
@@ -71,9 +62,7 @@ async function fetchStarlinkTles() {
         name,
         satrec: twoline2satrec(line1, line2)
       });
-    } catch {
-      // 잘못된 TLE는 무시
-    }
+    } catch {}
   }
 
   return sats;
@@ -81,7 +70,6 @@ async function fetchStarlinkTles() {
 
 function getSatellitePosition(satrec, date) {
   const pv = propagate(satrec, date);
-
   if (!pv.position) return null;
 
   const gmst = gstime(date);
@@ -96,7 +84,6 @@ function getSatellitePosition(satrec, date) {
 
 function haversineKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
-
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
 
@@ -118,9 +105,7 @@ function estimateElevationDeg(observer, satPos) {
   );
 
   const h = Math.max(satPos.heightKm, 1);
-  const angleRad = Math.atan2(h, groundDistance);
-
-  return angleRad * 180 / Math.PI;
+  return Math.atan2(h, groundDistance) * 180 / Math.PI;
 }
 
 function scorePass({ elevationDeg, weather, date }) {
@@ -159,6 +144,7 @@ function scorePass({ elevationDeg, weather, date }) {
 function grade(score) {
   if (score >= 85) return "🟢 매우 좋음";
   if (score >= 70) return "🟡 관측 가능";
+  if (score >= 50) return "🟠 부족";
   return "🔴 어려움";
 }
 
@@ -169,6 +155,15 @@ function reasonText({ elevationDeg, weather }) {
     `구름 ${weather.cloudCover}%`,
     `강수확률 ${weather.precipitationProbability}%`
   ].join(" · ");
+}
+
+function failReason(best) {
+  if (!best) return "후보 위성 없음";
+  if (best.weather.cloudCover >= 70) return "구름 많음";
+  if (best.weather.precipitationProbability >= 50) return "강수확률 높음";
+  if (best.elevationDeg < 35) return "고도 낮음";
+  if (best.score < CONFIG.scoring.minScoreToNotify) return "점수 부족";
+  return "기준 미달";
 }
 
 function buildPassesForSite(site, sats, weather) {
@@ -204,8 +199,6 @@ function buildPassesForSite(site, sats, weather) {
         date
       });
 
-      if (score < CONFIG.scoring.minScoreToNotify) continue;
-
       candidates.push({
         city: site.name,
         satName: sat.name,
@@ -217,38 +210,42 @@ function buildPassesForSite(site, sats, weather) {
     }
   }
 
-  const deduped = [];
+  const sorted = candidates.sort((a, b) => b.score - a.score);
+  const best = sorted[0] || null;
 
-  for (const c of candidates.sort((a, b) => b.score - a.score)) {
-    const tooClose = deduped.some(d => {
+  const selected = [];
+
+  for (const c of sorted) {
+    if (c.score < CONFIG.scoring.minScoreToNotify) continue;
+
+    const tooClose = selected.some(d => {
       return Math.abs(d.date.getTime() - c.date.getTime()) < 15 * 60 * 1000;
     });
 
-    if (!tooClose) deduped.push(c);
+    if (!tooClose) selected.push(c);
 
-    if (deduped.length >= CONFIG.starlink.maxResultsPerCity) break;
+    if (selected.length >= CONFIG.starlink.maxResultsPerCity) break;
   }
 
-  return deduped.sort((a, b) => a.date - b.date);
+  return {
+    city: site.name,
+    totalCandidates: candidates.length,
+    best,
+    selected: selected.sort((a, b) => a.date - b.date)
+  };
 }
 
-function buildMessage(results) {
-  const good = results
-    .flat()
+function buildGoodMessage(siteResults) {
+  const good = siteResults
+    .flatMap(r => r.selected)
     .filter(r => r.score >= CONFIG.scoring.minScoreToNotify)
-    .filter(r => isObservableNight(r.date))
-    .sort((a, b) => {
-      if (a.city === b.city) return a.date - b.date;
-      return b.score - a.score;
-    });
+    .sort((a, b) => b.score - a.score);
 
-  if (good.length === 0) {
-    return null;
-  }
+  if (good.length === 0) return null;
 
   const lines = [];
 
-  lines.push("🛰️ <b>Starlink Observer AI V2.0.1</b>");
+  lines.push("🛰️ <b>Starlink Observer AI V2.0.2</b>");
   lines.push("관측 가능성이 높은 시간대만 선별했습니다.");
   lines.push("");
 
@@ -267,40 +264,62 @@ function buildMessage(results) {
   return lines.join("\n");
 }
 
-function makeCacheKey(results) {
-  return results
-    .flat()
-    .filter(r => r.score >= CONFIG.scoring.minScoreToNotify)
-    .filter(r => isObservableNight(r.date))
-    .map(r => `${r.city}-${formatKst(r.date)}-${r.score}`)
-    .join("|");
+function buildTestMessage(siteResults) {
+  const lines = [];
+
+  lines.push("🛰️ <b>Starlink Observer AI V2.0.2 테스트 리포트</b>");
+  lines.push("70점 이상 관측 후보는 없습니다.");
+  lines.push("");
+
+  for (const r of siteResults) {
+    if (!r.best) {
+      lines.push(`🔴 <b>${r.city}</b> | 후보 없음`);
+      lines.push("- 야간 시간대에 고도 조건을 만족한 위성이 없습니다.");
+      lines.push("");
+      continue;
+    }
+
+    lines.push(
+      `${grade(r.best.score)} <b>${r.city}</b> | 최고 ${r.best.score}점 | ${formatKst(r.best.date)}`
+    );
+    lines.push(`- 탈락 이유: ${failReason(r.best)}`);
+    lines.push(`- ${reasonText(r.best)}`);
+    lines.push(`- 후보 수: ${r.totalCandidates}개`);
+    lines.push("");
+  }
+
+  lines.push("개발 모드: 기준 미달이어도 상태 확인용 메시지를 보냅니다.");
+
+  return lines.join("\n");
+}
+
+function makeCacheKey(message) {
+  return message.replace(/\s+/g, " ").slice(0, 500);
 }
 
 async function runObserver() {
-  console.log(`[${new Date().toISOString()}] Starlink Observer AI V2.0.1 started`);
+  console.log(`[${new Date().toISOString()}] Starlink Observer AI V2.0.2 started`);
 
   const sats = await fetchStarlinkTles();
   console.log(`Loaded Starlink TLE: ${sats.length}`);
 
-  const allResults = [];
+  const siteResults = [];
 
   for (const site of CONFIG.observerSites) {
     console.log(`Checking ${site.name}`);
 
     const weather = await getWeatherForecast(site.lat, site.lon);
-    const passes = buildPassesForSite(site, sats, weather);
+    const result = buildPassesForSite(site, sats, weather);
 
-    allResults.push(passes);
+    console.log(
+      `${site.name}: candidates=${result.totalCandidates}, best=${result.best?.score ?? "none"}`
+    );
+
+    siteResults.push(result);
   }
 
-  const message = buildMessage(allResults);
-
-  if (!message) {
-    console.log("No good observation window.");
-    return;
-  }
-
-  const cacheKey = makeCacheKey(allResults);
+  const message = buildGoodMessage(siteResults) || buildTestMessage(siteResults);
+  const cacheKey = makeCacheKey(message);
 
   if (sentCache.has(cacheKey)) {
     console.log("Same result already sent. Skip.");
@@ -310,7 +329,6 @@ async function runObserver() {
   sentCache.add(cacheKey);
 
   await sendTelegram(message);
-
   console.log("Telegram sent.");
 }
 
