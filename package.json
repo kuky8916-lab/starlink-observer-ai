@@ -1,15 +1,14 @@
 {
   "name": "starlink-observer-ai",
   "version": "2.0.0",
-  "description": "AI Starlink Observer",
+  "type": "module",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js"
   },
   "dependencies": {
-    "axios": "^1.8.1",
-    "cheerio": "^1.0.0",
-    "moment-timezone": "^0.5.47",
-    "node-fetch": "^3.3.2"
+    "dotenv": "^16.4.7",
+    "node-fetch": "^3.3.2",
+    "satellite.js": "^5.0.0"
   }
 }
