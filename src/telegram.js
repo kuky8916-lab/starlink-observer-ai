@@ -1,25 +1,23 @@
-const axios = require("axios");
+import { CONFIG } from "./config.js";
 
-async function sendTelegram(token, chatId, text) {
-  if (!token || !chatId) {
-    throw new Error("Telegram Token 또는 Chat ID가 없습니다.");
-  }
+export async function sendTelegram(text) {
+  const url = `https://api.telegram.org/bot${CONFIG.telegram.token}/sendMessage`;
 
-  const url = `https://api.telegram.org/bot${token}/sendMessage`;
-
-  await axios.post(
-    url,
-    {
-      chat_id: chatId,
-      text,
-      disable_web_page_preview: true,
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
     },
-    {
-      timeout: 10000,
-    }
-  );
-}
+    body: JSON.stringify({
+      chat_id: CONFIG.telegram.chatId,
+      text,
+      parse_mode: "HTML",
+      disable_web_page_preview: true
+    })
+  });
 
-module.exports = {
-  sendTelegram,
-};
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Telegram error: ${res.status} ${body}`);
+  }
+}
