@@ -3,6 +3,7 @@ import {
   propagate,
   gstime,
   eciToEcf,
+  eciToGeodetic,
   ecfToLookAngles,
   degreesToRadians,
   radiansToDegrees
@@ -11,6 +12,9 @@ import {
 import SunCalc from "suncalc";
 import { CONFIG } from "./config.js";
 import { findNearestWeather } from "./weather.js";
+
+const EARTH_RADIUS_KM = 6371;
+const PASS_BUCKET_MINUTES = 45;
 
 export function parseSatellite(tle) {
   try {
@@ -60,12 +64,44 @@ export function directionText(azimuthDeg) {
   return "북서";
 }
 
+function vectorLength(v) {
+  return Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+}
+
+function dot(a, b) {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+function isSatelliteSunlit(positionEci, date) {
+  const sun = SunCalc.getPosition(date, 0, 0);
+
+  const sunDirection = {
+    x: Math.cos(sun.altitude) * Math.cos(sun.azimuth),
+    y: Math.cos(sun.altitude) * Math.sin(sun.azimuth),
+    z: Math.sin(sun.altitude)
+  };
+
+  const proj = dot(positionEci, sunDirection);
+
+  if (proj > 0) return true;
+
+  const satDistance = vectorLength(positionEci);
+  const perpendicularDistanceSq = satDistance * satDistance - proj * proj;
+
+  if (perpendicularDistanceSq < 0) return false;
+
+  const perpendicularDistance = Math.sqrt(perpendicularDistanceSq);
+
+  return perpendicularDistance > EARTH_RADIUS_KM;
+}
+
 export function getLookAngles(site, satrec, date) {
   const pv = propagate(satrec, date);
   if (!pv.position) return null;
 
   const gmst = gstime(date);
   const positionEcf = eciToEcf(pv.position, gmst);
+  const geo = eciToGeodetic(pv.position, gmst);
 
   const observerGd = {
     longitude: degreesToRadians(site.lon),
@@ -78,33 +114,44 @@ export function getLookAngles(site, satrec, date) {
   return {
     azimuthDeg: normalizeDegrees(radiansToDegrees(look.azimuth)),
     elevationDeg: radiansToDegrees(look.elevation),
-    rangeKm: look.rangeSat
+    rangeKm: look.rangeSat,
+    satLatDeg: radiansToDegrees(geo.latitude),
+    satLonDeg: normalizeDegrees(radiansToDegrees(geo.longitude)),
+    satHeightKm: geo.height,
+    sunlit: isSatelliteSunlit(pv.position, date)
   };
 }
 
-function estimateMagnitude({ elevationDeg, rangeKm, sunAltitudeDeg, cloudCover }) {
-  let mag = 3.4;
+function estimateMagnitude({
+  elevationDeg,
+  rangeKm,
+  sunAltitudeDeg,
+  cloudCover,
+  sunlit
+}) {
+  let mag = sunlit ? 3.2 : 6.5;
 
-  if (elevationDeg >= 85) mag -= 2.4;
-  else if (elevationDeg >= 75) mag -= 2.1;
-  else if (elevationDeg >= 65) mag -= 1.7;
+  if (elevationDeg >= 85) mag -= 2.5;
+  else if (elevationDeg >= 75) mag -= 2.2;
+  else if (elevationDeg >= 65) mag -= 1.8;
   else if (elevationDeg >= 55) mag -= 1.3;
   else if (elevationDeg >= 45) mag -= 0.9;
   else if (elevationDeg >= 35) mag -= 0.5;
   else mag -= 0.1;
 
-  if (rangeKm <= 320) mag -= 1.0;
-  else if (rangeKm <= 450) mag -= 0.7;
+  if (rangeKm <= 320) mag -= 1.1;
+  else if (rangeKm <= 450) mag -= 0.8;
   else if (rangeKm <= 650) mag -= 0.4;
   else if (rangeKm <= 900) mag -= 0.1;
   else if (rangeKm >= 1300) mag += 0.7;
 
-  if (sunAltitudeDeg <= -18) mag += 0.5;
+  if (sunAltitudeDeg <= -22) mag += 0.8;
+  else if (sunAltitudeDeg <= -18) mag += 0.5;
   else if (sunAltitudeDeg <= -14) mag += 0.2;
   else if (sunAltitudeDeg <= -10) mag += 0.4;
   else if (sunAltitudeDeg <= -8) mag += 0.8;
 
-  if (cloudCover >= 60) mag += 1.4;
+  if (cloudCover >= 60) mag += 1.5;
   else if (cloudCover >= 40) mag += 0.9;
   else if (cloudCover >= 25) mag += 0.5;
   else if (cloudCover >= 10) mag += 0.2;
@@ -120,8 +167,16 @@ function starRating(magnitude) {
   return "★☆☆☆☆";
 }
 
-export function scorePass({ site, elevationDeg, rangeKm, weather, date }) {
+export function scorePass({
+  site,
+  elevationDeg,
+  rangeKm,
+  weather,
+  date,
+  sunlit = true
+}) {
   if (!isObservableNight(date, site)) return 0;
+  if (!sunlit) return 0;
 
   const cloud = Number(weather.cloudCover ?? 100);
   const rain = Number(weather.precipitationProbability ?? 100);
@@ -133,20 +188,20 @@ export function scorePass({ site, elevationDeg, rangeKm, weather, date }) {
 
   let score = 0;
 
-  if (elevationDeg >= 85) score += 28;
-  else if (elevationDeg >= 75) score += 25;
-  else if (elevationDeg >= 65) score += 22;
-  else if (elevationDeg >= 55) score += 18;
-  else if (elevationDeg >= 45) score += 14;
-  else if (elevationDeg >= 35) score += 9;
-  else if (elevationDeg >= 25) score += 4;
+  if (elevationDeg >= 85) score += 26;
+  else if (elevationDeg >= 75) score += 24;
+  else if (elevationDeg >= 65) score += 21;
+  else if (elevationDeg >= 55) score += 17;
+  else if (elevationDeg >= 45) score += 13;
+  else if (elevationDeg >= 35) score += 8;
+  else if (elevationDeg >= 25) score += 3;
   else return 0;
 
-  if (sunAltitudeDeg <= -18) score += 17;
-  else if (sunAltitudeDeg <= -15) score += 15;
+  if (sunAltitudeDeg <= -18) score += 15;
+  else if (sunAltitudeDeg <= -15) score += 14;
   else if (sunAltitudeDeg <= -12) score += 12;
-  else if (sunAltitudeDeg <= -10) score += 8;
-  else if (sunAltitudeDeg <= -8) score += 4;
+  else if (sunAltitudeDeg <= -10) score += 9;
+  else if (sunAltitudeDeg <= -8) score += 5;
   else return 0;
 
   if (cloud <= 3) score += 22;
@@ -177,14 +232,15 @@ export function scorePass({ site, elevationDeg, rangeKm, weather, date }) {
     elevationDeg,
     rangeKm,
     sunAltitudeDeg,
-    cloudCover: cloud
+    cloudCover: cloud,
+    sunlit
   });
 
   if (magnitude <= -1.0) score += 10;
   else if (magnitude <= -0.2) score += 7;
   else if (magnitude <= 0.8) score += 4;
   else if (magnitude <= 1.8) score += 1;
-  else score -= 8;
+  else score -= 12;
 
   return Math.max(0, Math.min(99, Math.round(score)));
 }
@@ -214,8 +270,8 @@ function isHardWeatherFail(weather) {
 }
 
 function makePassKey(candidate) {
-  const bucket = Math.floor(candidate.date.getTime() / (40 * 60 * 1000));
-  return `${candidate.city}-${bucket}`;
+  const bucket = Math.floor(candidate.date.getTime() / (PASS_BUCKET_MINUTES * 60 * 1000));
+  return `${candidate.city}-${candidate.satName}-${bucket}`;
 }
 
 function collapseSamePasses(candidates) {
@@ -230,7 +286,10 @@ function collapseSamePasses(candidates) {
     }
   }
 
-  return Array.from(map.values()).sort((a, b) => b.score - a.score);
+  return Array.from(map.values()).sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return a.date - b.date;
+  });
 }
 
 function selectBestPerCity(collapsed) {
@@ -267,6 +326,7 @@ export function findPassesForSite(site, rawTles, weather) {
       const look = getLookAngles(site, sat.satrec, date);
       if (!look) continue;
 
+      if (!look.sunlit) continue;
       if (look.elevationDeg < CONFIG.starlink.minElevationDeg) continue;
 
       const sunAltitudeDeg = getSunAltitudeDeg(site, date);
@@ -275,7 +335,8 @@ export function findPassesForSite(site, rawTles, weather) {
         elevationDeg: look.elevationDeg,
         rangeKm: look.rangeKm,
         sunAltitudeDeg,
-        cloudCover: Number(nearestWeather.cloudCover ?? 100)
+        cloudCover: Number(nearestWeather.cloudCover ?? 100),
+        sunlit: look.sunlit
       });
 
       const score = scorePass({
@@ -283,7 +344,8 @@ export function findPassesForSite(site, rawTles, weather) {
         elevationDeg: look.elevationDeg,
         rangeKm: look.rangeKm,
         weather: nearestWeather,
-        date
+        date,
+        sunlit: look.sunlit
       });
 
       if (score <= 0) continue;
