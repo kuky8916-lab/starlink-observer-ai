@@ -9,7 +9,7 @@
   "dependencies": {
     "dotenv": "^16.4.7",
     "node-fetch": "^3.3.2",
-    "satellite.js": "^5.0.0"
+    "satellite.js": "^5.0.0",
     "suncalc": "^1.9.0"
   }
 }
