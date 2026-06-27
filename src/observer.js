@@ -235,7 +235,6 @@ function collapseSamePasses(candidates) {
 
 function selectBestPerCity(collapsed) {
   if (collapsed.length === 0) return [];
-
   return [collapsed[0]];
 }
 
@@ -324,3 +323,4 @@ export function findPassesForSite(site, rawTles, weather) {
     selected
   };
 }
+
