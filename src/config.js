@@ -24,11 +24,11 @@ export const CONFIG = {
   },
 
   scoring: {
-    minScoreToNotify: 60,
-    excellentScore: 80,
-    cloudPenaltyStrong: 70,
-    rainPenaltyStrong: 60
-  },
+  minScoreToNotify: 70,
+  excellentScore: 85,
+  cloudPenaltyStrong: 70,
+  rainPenaltyStrong: 60
+},
 
   schedule: {
     intervalMinutes: Number(process.env.INTERVAL_MINUTES || 60)
