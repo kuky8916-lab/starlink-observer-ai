@@ -14,7 +14,7 @@ import { CONFIG } from "./config.js";
 import { findNearestWeather } from "./weather.js";
 
 const EARTH_RADIUS_KM = 6371;
-const PASS_BUCKET_MINUTES = 45;
+const PASS_BUCKET_MINUTES = 50;
 
 export function parseSatellite(tle) {
   try {
@@ -90,9 +90,7 @@ function isSatelliteSunlit(positionEci, date) {
 
   if (perpendicularDistanceSq < 0) return false;
 
-  const perpendicularDistance = Math.sqrt(perpendicularDistanceSq);
-
-  return perpendicularDistance > EARTH_RADIUS_KM;
+  return Math.sqrt(perpendicularDistanceSq) > EARTH_RADIUS_KM;
 }
 
 export function getLookAngles(site, satrec, date) {
@@ -129,32 +127,32 @@ function estimateMagnitude({
   cloudCover,
   sunlit
 }) {
-  let mag = sunlit ? 3.2 : 6.5;
+  let mag = sunlit ? 3.5 : 7.0;
 
-  if (elevationDeg >= 85) mag -= 2.5;
-  else if (elevationDeg >= 75) mag -= 2.2;
-  else if (elevationDeg >= 65) mag -= 1.8;
-  else if (elevationDeg >= 55) mag -= 1.3;
+  if (elevationDeg >= 85) mag -= 2.7;
+  else if (elevationDeg >= 75) mag -= 2.3;
+  else if (elevationDeg >= 65) mag -= 1.9;
+  else if (elevationDeg >= 55) mag -= 1.4;
   else if (elevationDeg >= 45) mag -= 0.9;
-  else if (elevationDeg >= 35) mag -= 0.5;
-  else mag -= 0.1;
+  else if (elevationDeg >= 35) mag -= 0.4;
+  else mag += 0.2;
 
-  if (rangeKm <= 320) mag -= 1.1;
-  else if (rangeKm <= 450) mag -= 0.8;
-  else if (rangeKm <= 650) mag -= 0.4;
-  else if (rangeKm <= 900) mag -= 0.1;
-  else if (rangeKm >= 1300) mag += 0.7;
+  if (rangeKm <= 300) mag -= 1.2;
+  else if (rangeKm <= 420) mag -= 0.8;
+  else if (rangeKm <= 600) mag -= 0.4;
+  else if (rangeKm <= 850) mag -= 0.1;
+  else if (rangeKm >= 1200) mag += 0.8;
 
-  if (sunAltitudeDeg <= -22) mag += 0.8;
+  if (sunAltitudeDeg <= -24) mag += 0.9;
   else if (sunAltitudeDeg <= -18) mag += 0.5;
   else if (sunAltitudeDeg <= -14) mag += 0.2;
-  else if (sunAltitudeDeg <= -10) mag += 0.4;
-  else if (sunAltitudeDeg <= -8) mag += 0.8;
+  else if (sunAltitudeDeg <= -10) mag += 0.5;
+  else if (sunAltitudeDeg <= -8) mag += 1.0;
 
-  if (cloudCover >= 60) mag += 1.5;
-  else if (cloudCover >= 40) mag += 0.9;
-  else if (cloudCover >= 25) mag += 0.5;
-  else if (cloudCover >= 10) mag += 0.2;
+  if (cloudCover >= 60) mag += 1.6;
+  else if (cloudCover >= 40) mag += 1.0;
+  else if (cloudCover >= 25) mag += 0.6;
+  else if (cloudCover >= 10) mag += 0.25;
 
   return Math.round(mag * 10) / 10;
 }
@@ -183,50 +181,51 @@ export function scorePass({
   const visibility = Number(weather.visibility ?? 0);
   const sunAltitudeDeg = getSunAltitudeDeg(site, date);
 
-  if (cloud >= 75) return 0;
-  if (rain >= 50) return 0;
+  if (cloud >= 70) return 0;
+  if (rain >= 45) return 0;
 
   let score = 0;
 
-  if (elevationDeg >= 85) score += 26;
-  else if (elevationDeg >= 75) score += 24;
-  else if (elevationDeg >= 65) score += 21;
-  else if (elevationDeg >= 55) score += 17;
-  else if (elevationDeg >= 45) score += 13;
-  else if (elevationDeg >= 35) score += 8;
-  else if (elevationDeg >= 25) score += 3;
+  if (elevationDeg >= 85) score += 24;
+  else if (elevationDeg >= 75) score += 22;
+  else if (elevationDeg >= 65) score += 19;
+  else if (elevationDeg >= 55) score += 15;
+  else if (elevationDeg >= 45) score += 11;
+  else if (elevationDeg >= 35) score += 6;
+  else if (elevationDeg >= 25) score += 2;
   else return 0;
 
-  if (sunAltitudeDeg <= -18) score += 15;
-  else if (sunAltitudeDeg <= -15) score += 14;
+  if (sunAltitudeDeg <= -24) score += 11;
+  else if (sunAltitudeDeg <= -18) score += 17;
+  else if (sunAltitudeDeg <= -15) score += 16;
   else if (sunAltitudeDeg <= -12) score += 12;
-  else if (sunAltitudeDeg <= -10) score += 9;
-  else if (sunAltitudeDeg <= -8) score += 5;
+  else if (sunAltitudeDeg <= -10) score += 7;
+  else if (sunAltitudeDeg <= -8) score += 3;
   else return 0;
 
-  if (cloud <= 3) score += 22;
-  else if (cloud <= 8) score += 19;
-  else if (cloud <= 15) score += 15;
-  else if (cloud <= 25) score += 10;
-  else if (cloud <= 40) score += 5;
-  else if (cloud <= 55) score -= 8;
-  else score -= 22;
+  if (cloud <= 3) score += 20;
+  else if (cloud <= 8) score += 17;
+  else if (cloud <= 15) score += 13;
+  else if (cloud <= 25) score += 8;
+  else if (cloud <= 40) score += 3;
+  else if (cloud <= 55) score -= 10;
+  else score -= 25;
 
-  if (rain <= 2) score += 9;
-  else if (rain <= 8) score += 7;
-  else if (rain <= 15) score += 4;
-  else if (rain <= 30) score -= 4;
-  else score -= 18;
+  if (rain <= 2) score += 8;
+  else if (rain <= 8) score += 6;
+  else if (rain <= 15) score += 3;
+  else if (rain <= 30) score -= 6;
+  else score -= 20;
 
-  if (visibility >= 20000) score += 5;
-  else if (visibility >= 12000) score += 3;
-  else if (visibility > 0 && visibility < 8000) score -= 10;
+  if (visibility >= 20000) score += 4;
+  else if (visibility >= 12000) score += 2;
+  else if (visibility > 0 && visibility < 8000) score -= 12;
 
-  if (rangeKm <= 320) score += 8;
-  else if (rangeKm <= 450) score += 6;
-  else if (rangeKm <= 650) score += 4;
-  else if (rangeKm <= 900) score += 1;
-  else if (rangeKm >= 1300) score -= 10;
+  if (rangeKm <= 300) score += 7;
+  else if (rangeKm <= 420) score += 5;
+  else if (rangeKm <= 600) score += 3;
+  else if (rangeKm <= 850) score += 1;
+  else if (rangeKm >= 1200) score -= 12;
 
   const magnitude = estimateMagnitude({
     elevationDeg,
@@ -236,13 +235,13 @@ export function scorePass({
     sunlit
   });
 
-  if (magnitude <= -1.0) score += 10;
-  else if (magnitude <= -0.2) score += 7;
-  else if (magnitude <= 0.8) score += 4;
-  else if (magnitude <= 1.8) score += 1;
-  else score -= 12;
+  if (magnitude <= -1.0) score += 17;
+  else if (magnitude <= -0.2) score += 13;
+  else if (magnitude <= 0.8) score += 8;
+  else if (magnitude <= 1.8) score += 2;
+  else score -= 18;
 
-  return Math.max(0, Math.min(99, Math.round(score)));
+  return Math.max(0, Math.min(96, Math.round(score)));
 }
 
 function successProbability(score, weather) {
@@ -251,20 +250,21 @@ function successProbability(score, weather) {
 
   let p = score;
 
-  if (cloud >= 40) p -= 10;
-  if (cloud >= 55) p -= 10;
-  if (rain >= 20) p -= 8;
-  if (rain >= 35) p -= 10;
+  if (cloud >= 25) p -= 4;
+  if (cloud >= 40) p -= 8;
+  if (cloud >= 55) p -= 12;
+  if (rain >= 15) p -= 5;
+  if (rain >= 30) p -= 10;
 
-  return Math.max(0, Math.min(97, Math.round(p)));
+  return Math.max(0, Math.min(96, Math.round(p)));
 }
 
 function isHardWeatherFail(weather) {
   const cloud = Number(weather.cloudCover ?? 100);
   const rain = Number(weather.precipitationProbability ?? 100);
 
-  if (cloud >= 75) return true;
-  if (rain >= 50) return true;
+  if (cloud >= 70) return true;
+  if (rain >= 45) return true;
 
   return false;
 }
