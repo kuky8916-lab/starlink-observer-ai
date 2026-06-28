@@ -2,6 +2,7 @@ import { CONFIG, validateConfig } from "./config.js";
 import { getWeatherForecast } from "./weather.js";
 import { sendTelegram } from "./telegram.js";
 import { fetchStarlinkTles } from "./tle.js";
+import { saveStarlinkResults } from "./sheet.js";
 import {
   findPassesForSite,
   isObservableNight
@@ -177,6 +178,15 @@ async function runObserver() {
 
   await sendTelegram(message);
   console.log("Telegram sent.");
+
+  try {
+    await saveStarlinkResults(siteResults, CONFIG);
+  } catch (err) {
+    console.error("Sheet save failed:", err);
+    try {
+      await sendTelegram(`⚠️ Starlink DB 저장 실패\n${err.message}`);
+    } catch {}
+  }
 }
 
 async function main() {
