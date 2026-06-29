@@ -67,9 +67,22 @@ function failReason(best) {
   return "기준 미달";
 }
 
+function getRecommendedRows(siteResults) {
+  const selected = siteResults
+    .flatMap(r => r.selected || [])
+    .filter(r => r && r.score >= CONFIG.scoring.minScoreToNotify)
+    .sort((a, b) => b.score - a.score);
+
+  if (selected.length > 0) return selected;
+
+  return siteResults
+    .map(r => r.best)
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score);
+}
+
 function buildGoodMessage(siteResults) {
-  const good = siteResults
-    .flatMap(r => r.selected)
+  const good = getRecommendedRows(siteResults)
     .filter(r => r.score >= CONFIG.scoring.minScoreToNotify)
     .sort((a, b) => b.score - a.score);
 
@@ -145,6 +158,18 @@ function makeCacheKey(message) {
   return message.replace(/\s+/g, " ").slice(0, 500);
 }
 
+function buildSheetResults(siteResults) {
+  return siteResults.map(site => {
+    const selected = Array.isArray(site.selected) ? site.selected : [];
+    const rows = selected.length > 0 ? selected : (site.best ? [site.best] : []);
+
+    return {
+      ...site,
+      selected: rows
+    };
+  });
+}
+
 async function runObserver() {
   console.log(`[${new Date().toISOString()}] Starlink Observer AI V2.4 started`);
 
@@ -171,6 +196,13 @@ async function runObserver() {
 
   if (sentCache.has(cacheKey)) {
     console.log("Same result already sent. Skip.");
+
+    try {
+      await saveStarlinkResults(buildSheetResults(siteResults), CONFIG);
+    } catch (err) {
+      console.error("Sheet save failed:", err);
+    }
+
     return;
   }
 
@@ -180,7 +212,7 @@ async function runObserver() {
   console.log("Telegram sent.");
 
   try {
-    await saveStarlinkResults(siteResults, CONFIG);
+    await saveStarlinkResults(buildSheetResults(siteResults), CONFIG);
   } catch (err) {
     console.error("Sheet save failed:", err);
     try {
@@ -214,4 +246,3 @@ main().catch(async err => {
 
   process.exit(1);
 });
-
