@@ -5,9 +5,7 @@ let lastUpdated = 0;
 
 const DEFAULT_TLE_URLS = [
   "https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle",
-  "https://celestrak.org/NORAD/elements/starlink.txt",
-  "https://www.celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle",
-  "https://www.celestrak.org/NORAD/elements/starlink.txt"
+  "https://celestrak.org/NORAD/elements/starlink.txt"
 ];
 
 function sleep(ms) {
@@ -28,7 +26,7 @@ function getTleUrls() {
   return urls;
 }
 
-async function fetchTextWithTimeout(url, timeoutMs = 45000) {
+async function fetchTextWithTimeout(url, timeoutMs = 30000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -36,7 +34,7 @@ async function fetchTextWithTimeout(url, timeoutMs = 45000) {
     const response = await fetch(url, {
       signal: controller.signal,
       headers: {
-        "User-Agent": "StarlinkObserverAI/2.6"
+        "User-Agent": "StarlinkObserverAI/2.2"
       }
     });
 
@@ -93,11 +91,11 @@ export async function fetchStarlinkTles(forceRefresh = false) {
   let lastError = null;
 
   for (const url of urls) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         console.log(`Fetching TLE: ${url} attempt ${attempt}`);
 
-        const text = await fetchTextWithTimeout(url, 45000);
+        const text = await fetchTextWithTimeout(url, 30000);
         const satellites = parseTleText(text);
 
         if (satellites.length < 100) {
@@ -115,7 +113,7 @@ export async function fetchStarlinkTles(forceRefresh = false) {
       } catch (err) {
         lastError = err;
         console.error(`TLE fetch failed: ${url} attempt ${attempt} - ${err.message}`);
-        await sleep(2000 * attempt);
+        await sleep(3000 * attempt);
       }
     }
   }
