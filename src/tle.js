@@ -1,11 +1,17 @@
 import { CONFIG } from "./config.js";
+import { readFile, writeFile } from "node:fs/promises";
 
 let cachedTles = [];
 let lastUpdated = 0;
 
+const CACHE_FILE = "/tmp/starlink_tle_cache.json";
+
 const DEFAULT_TLE_URLS = [
   "https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle",
-  "https://celestrak.org/NORAD/elements/starlink.txt"
+  "https://celestrak.org/NORAD/elements/starlink.txt",
+  "https://celestrak.org/NORAD/elements/supplemental/starlink.txt",
+  "https://www.celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle",
+  "https://www.celestrak.org/NORAD/elements/starlink.txt"
 ];
 
 function sleep(ms) {
@@ -26,7 +32,7 @@ function getTleUrls() {
   return urls;
 }
 
-async function fetchTextWithTimeout(url, timeoutMs = 30000) {
+async function fetchTextWithTimeout(url, timeoutMs = 20000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -34,7 +40,8 @@ async function fetchTextWithTimeout(url, timeoutMs = 30000) {
     const response = await fetch(url, {
       signal: controller.signal,
       headers: {
-        "User-Agent": "StarlinkObserverAI/2.2"
+        "User-Agent": "StarlinkObserverAI/2.6 Railway",
+        "Accept": "text/plain,*/*"
       }
     });
 
@@ -76,6 +83,39 @@ function parseTleText(text) {
   return satellites;
 }
 
+async function saveDiskCache(satellites) {
+  try {
+    await writeFile(
+      CACHE_FILE,
+      JSON.stringify({
+        updated: Date.now(),
+        satellites
+      }),
+      "utf-8"
+    );
+  } catch (err) {
+    console.error(`TLE disk cache save skipped: ${err.message}`);
+  }
+}
+
+async function loadDiskCache() {
+  try {
+    const text = await readFile(CACHE_FILE, "utf-8");
+    const data = JSON.parse(text);
+
+    if (!Array.isArray(data.satellites) || data.satellites.length < 100) {
+      return null;
+    }
+
+    return {
+      satellites: data.satellites,
+      updated: Number(data.updated || 0)
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchStarlinkTles(forceRefresh = false) {
   const cacheMinutes = CONFIG.starlink?.tleCacheMinutes ?? 60;
 
@@ -84,6 +124,7 @@ export async function fetchStarlinkTles(forceRefresh = false) {
     cachedTles.length > 0 &&
     Date.now() - lastUpdated < cacheMinutes * 60 * 1000
   ) {
+    console.log(`Using memory TLE cache: ${cachedTles.length}`);
     return cachedTles;
   }
 
@@ -91,11 +132,11 @@ export async function fetchStarlinkTles(forceRefresh = false) {
   let lastError = null;
 
   for (const url of urls) {
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         console.log(`Fetching TLE: ${url} attempt ${attempt}`);
 
-        const text = await fetchTextWithTimeout(url, 30000);
+        const text = await fetchTextWithTimeout(url, 20000);
         const satellites = parseTleText(text);
 
         if (satellites.length < 100) {
@@ -105,6 +146,8 @@ export async function fetchStarlinkTles(forceRefresh = false) {
         cachedTles = satellites;
         lastUpdated = Date.now();
 
+        await saveDiskCache(satellites);
+
         console.log(
           `Loaded ${satellites.length} Starlink TLEs (${new Date(lastUpdated).toISOString()})`
         );
@@ -113,17 +156,34 @@ export async function fetchStarlinkTles(forceRefresh = false) {
       } catch (err) {
         lastError = err;
         console.error(`TLE fetch failed: ${url} attempt ${attempt} - ${err.message}`);
-        await sleep(3000 * attempt);
+        await sleep(1500 * attempt);
       }
     }
   }
 
   if (cachedTles.length > 0) {
-    console.log("Using old cached TLE because live fetch failed.");
+    console.log(`Using old memory TLE cache because live fetch failed: ${cachedTles.length}`);
     return cachedTles;
   }
 
-  throw new Error(`TLE fetch failed after retries: ${lastError?.message ?? "unknown error"}`);
+  const diskCache = await loadDiskCache();
+
+  if (diskCache) {
+    cachedTles = diskCache.satellites;
+    lastUpdated = diskCache.updated || Date.now();
+
+    console.log(
+      `Using disk TLE cache because live fetch failed: ${cachedTles.length}`
+    );
+
+    return cachedTles;
+  }
+
+  console.error(
+    `No TLE available. Live fetch failed: ${lastError?.message ?? "unknown error"}`
+  );
+
+  return [];
 }
 
 export function clearTleCache() {
